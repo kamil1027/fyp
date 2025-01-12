@@ -1,0 +1,209 @@
+{% load static %}
+
+<script
+  type="text/javascript"
+  src="{% static 'vendor/jquery/jquery-3.2.1.min.js' %}"
+></script>
+
+<script
+  type="text/javascript"
+  src="{% static 'vendor/animsition/js/animsition.min.js' %}"
+></script>
+
+<script
+  src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+  integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
+  crossorigin="anonymous"
+></script>
+<script
+  src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+  integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
+  crossorigin="anonymous"
+></script>
+
+<script
+  type="text/javascript"
+  src="{% static 'vendor/select2/select2.min.js' %}"
+></script>
+<script type="text/javascript">
+  $(".selection-1").select2({
+    minimumResultsForSearch: 20,
+    dropdownParent: $("#dropDownSelect1")
+  });
+</script>
+
+<script
+  type="text/javascript"
+  src="{% static 'vendor/slick/slick.min.js' %}"
+></script>
+<script type="text/javascript" src="{% static 'js/slick-custom.js' %}"></script>
+
+<script
+  type="text/javascript"
+  src="{% static 'vendor/countdowntime/countdowntime.js' %}"
+></script>
+
+<script
+  type="text/javascript"
+  src="{% static 'vendor/lightbox2/js/lightbox.min.js' %}"
+></script>
+<script crossorigin src="{% static 'js/react.development.js' %}"></script>
+<script crossorigin src="{% static 'js/react-dom.development.js' %}"></script>
+
+<script>
+  async function hashPassword(password, salt) {
+      const enc = new TextEncoder();
+      const combined = password + salt;  // Combine password and salt
+      console.log(password, salt)
+      const passwordData = enc.encode(combined);
+
+      console.log("Password + Salt:", combined);  // Debugging: Log combined password and salt
+
+      const hashBuffer = await crypto.subtle.digest('SHA-256', passwordData);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      console.log("Hashed Password:", hashHex);  // Debugging: Log resulting hash
+
+      return hashHex;
+  }
+
+  async function handleLogin(event) {
+      event.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('ipassword').value;
+      const salt = username;  // Use username as the salt
+      const mfaCode = document.getElementById('mfa_code').value;
+      const hashedPassword = await hashPassword(password, salt);
+      document.getElementById('hashed_password').value = hashedPassword;
+
+      console.log("Final Hashed Password:", hashedPassword);  // Debugging: Log final hashed password
+
+      document.getElementById('loginForm').submit();
+  }
+
+  document.getElementById('loginForm').addEventListener('submit', handleLogin);
+</script>
+
+
+
+<script>
+  function showMfaPopup(passwordId) {
+    document.getElementById('password_id').value = passwordId;
+    console.log(`Password ID set to: ${passwordId}`);
+    $('#mfa-popup').modal('show');
+  }
+
+  document.getElementById('mfa-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const mfaCode = document.getElementById('mfa_code').value;
+    const passwordId = document.getElementById('password_id').value;
+    console.log(`Submitting MFA code: ${mfaCode} for password ID: ${passwordId}`);
+
+    fetch("{% url 'verify_mfa' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({
+        mfa_code: mfaCode,
+        password_id: passwordId
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'success') {
+        const passwordField = document.getElementById(`password-${passwordId}`);
+        console.log(`Updating password field for ID ${passwordId}: ${data.password}`);
+        passwordField.textContent = data.password;
+        $('#mfa-popup').modal('hide');
+      } else {
+        alert('MFA verification failed. Please try again.');
+      }
+    })
+    .catch(error => console.error('Error:', error));
+  });
+</script>
+
+<script>
+  function showCreatePasswordForm() {
+    $('#create-password-modal').modal('show');
+  }
+
+  document.getElementById('create-password-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const name = document.getElementById('name').value;
+    const password = document.getElementById('password').value;
+    const expirationDay = document.getElementById('expiration_day').value;
+
+    fetch("{% url 'createpw' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({
+        name: name,
+        password: password,
+        expiration_day: expirationDay
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'success') {
+        alert('Password created successfully!');
+        $('#create-password-modal').modal('hide');
+        document.getElementById('create-password-form').reset();
+        window.location.href = "{% url 'index' %}";
+      } else {
+        alert('An error occurred. Please try again.');
+      }
+    })
+    .catch(error => console.error('Error:', error));
+  });
+</script>
+
+<script>
+  function showDeletePopup(passwordId) {
+    document.getElementById('delete_password_id').value = passwordId;
+    console.log(`Password ID set for deletion: ${passwordId}`);
+    $('#delete-password-modal').modal('show');
+  }
+
+  document.getElementById('delete-mfa-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const mfaCode = document.getElementById('delete_mfa_code').value;
+    const passwordId = document.getElementById('delete_password_id').value;
+    console.log(`Submitting MFA code: ${mfaCode} for password ID: ${passwordId}`);
+
+    fetch("{% url 'deletepw' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({
+        mfa_code: mfaCode,
+        password_id: passwordId
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'success') {
+        console.log(`Password with ID ${passwordId} deleted successfully`);
+        $('#delete-password-modal').modal('hide');
+        document.getElementById(`password-${passwordId}`).closest('tr').remove(); 
+        window.location.href = "{% url 'index' %}";
+      } else {
+        alert('MFA verification failed. Please try again.');
+      }
+    })
+    .catch(error => console.error('Error:', error));
+  });
+</script>
+
+<script src="{% static 'js/main.js' %}"></script>
