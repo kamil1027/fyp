@@ -16,20 +16,23 @@
             </tr>
         </thead>
         {% if passwords %}
-            <tbody>
-                {% for data in passwords %}
-                <tr>
-                    <td>{{ data.name }}</td>
-                    <td id="password-{{ data.password_id }}">{{ data.password }}</td>
-                    <td>{{ data.days_remaining }} days, {{ data.hours_remaining }} hours, {{ data.minutes_remaining }} minutes</td>
-                    <td>{{ data.created_by }}</td>
-                    <td>
-                        <button class="btn btn-primary" onclick="showMfaPopup('{{ data.password_id }}')">View</button>
-                        <button class="btn btn-danger" onclick="showDeletePopup('{{ data.password_id }}')">Delete</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
+        <tbody>
+            {% for data in passwords %}
+            <tr class="{% if data.days_remaining < 14 %}table-danger{% endif %}">
+                <td>{{ data.name }}</td>
+                <td id="password-{{ data.password_id }}">{{ data.password }}</td>
+                <td>{{ data.days_remaining }} days, {{ data.hours_remaining }} hours, {{ data.minutes_remaining }} minutes</td>
+                <td>{{ data.created_by }}</td>
+                <td>
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-primary mr-2" onclick="showMfaPopup('{{ data.password_id }}')">View</button>
+                        <button class="btn btn-secondary mr-2" onclick="showModifyPopup('{{ data.password_id }}', '{{ data.name }}', '{{ data.expiration_day }}')">Modify</button>
+                        <button class="btn btn-danger mr-2" onclick="showDeletePopup('{{ data.password_id }}')">Delete</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
         {% else %}
       </table>
             <div class="d-flex justify-content-center">
@@ -45,7 +48,47 @@
   </div>
 </div>
 
-<!-- MFA Popup -->
+
+<!-- Modify Password Modal -->
+<div id="modify-popup" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="modifyLabel" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modifyLabel">Modify Password</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <form id="modify-form">
+        <div class="modal-body">
+          <input type="hidden" id="modify_password_id" name="password_id">
+          <div class="form-group">
+            <label for="modify_password_name">Name</label>
+            <input type="text" class="form-control" id="modify_password_name" name="name" required>
+          </div>
+          <div class="form-group">
+            <label for="modify_password_value">Password</label>
+            <input type="text" class="form-control" id="modify_password_value" name="password" required>
+          </div>
+          <div class="form-group">
+            <label for="modify_expiration_day">Expiration Day</label>
+            <input type="text" class="form-control" id="modify_expiration_day" name="expiration_day" required>
+          </div>
+          <div class="form-group">
+            <label for="modify_mfa_code">MFA Code</label>
+            <input type="text" class="form-control" id="modify_mfa_code" name="mfa_code" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Existing MFA Popup -->
 <div id="mfa-popup" class="modal fade" tabindex="-1" role="dialog">
   <div class="modal-dialog" role="document">
     <div class="modal-content">
@@ -69,7 +112,7 @@
   </div>
 </div>
 
-<!-- Delete Password Modal -->
+<!-- Existing Delete Password Modal -->
 <div id="delete-password-modal" class="modal fade" tabindex="-1" role="dialog">
   <div class="modal-dialog" role="document">
     <div class="modal-content">
@@ -92,6 +135,7 @@
     </div>
   </div>
 </div>
+
 {% else %}
   <p>You are not logged in</p>
   <a href="{% url 'login' %}">Login Page</a>

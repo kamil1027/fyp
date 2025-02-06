@@ -19,12 +19,13 @@ class Password(models.Model):
     passwordid = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100)
     password = models.CharField(max_length=100)
+    nonce = models.CharField(max_length=100, null=True)
     expiration_day = models.CharField(max_length=3)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, default=1)
     created_at = models.DateTimeField(default=timezone.now, editable=False)
     updated_at = models.DateTimeField(default=timezone.now, editable=False)
 
-    def __str__(self):
+    def str(self):
         return self.name
 
 class Directory(models.Model):

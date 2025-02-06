@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305 
 from .encrpytion import validate_password
 from datetime import timedelta
+from django.utils import timezone
 import pyotp, qrcode, io, base64, json, os
 
 def LoginView(request):
@@ -110,13 +111,27 @@ def verify_mfa(request):
             totp = pyotp.TOTP(user.mfakey)
             if totp.verify(entered_code):
                 password = Password.objects.get(pk=password_id)
-                return JsonResponse({'status': 'success', 'password': password.password})
+                created_at_str = user.created_at.strftime('%Y%m%d%H%M%S%f')
+                combined_key = (user.mfakey + created_at_str).encode('utf-8')
+                key = base64.b32encode(combined_key)
+                if len(key) < 32:
+                    key = key.ljust(32, b'\0')
+                else:
+                    key = key[:32]
+                encrypted_password, nonce = password.password.split(':')
+                encrypted_password = bytes.fromhex(encrypted_password)
+                nonce = bytes.fromhex(nonce)
+                chacha = ChaCha20Poly1305(key)
+                decrypted_password = chacha.decrypt(nonce, encrypted_password, None).decode('utf-8')
+
+                return JsonResponse({'status': 'success', 'password': decrypted_password})
             else:
                 return JsonResponse({'status': 'failure'})
         except Exception as e:
             print(f"Error: {e}")
             return JsonResponse({'status': 'error', 'message': str(e)})
     return JsonResponse({'status': 'error'})
+
 
 def RegisterView(request):
     if request.method == 'POST':
@@ -207,9 +222,13 @@ def CreateView(request):
             password_value = data.get('password')
             expiration_day = data.get('expiration_day')
             user = User.objects.get(name=request.session.get('username'))
-
-            key = ChaCha20Poly1305.generate_key()
-            
+            created_at_str = user.created_at.strftime('%Y%m%d%H%M%S%f')
+            combined_key = (user.mfakey + created_at_str).encode('utf-8')
+            key = base64.b32encode(combined_key)
+            if len(key) < 32:
+                key = key.ljust(32, b'\0')
+            else:
+                key = key[:32]
             chacha = ChaCha20Poly1305(key)
             nonce = os.urandom(12)
             encrypted_password = chacha.encrypt(nonce, password_value.encode(), None)
@@ -218,6 +237,7 @@ def CreateView(request):
                 name=password_name,
                 password=encrypted_password.hex() + ":" + nonce.hex(),
                 expiration_day=expiration_day,
+                nonce=nonce,
                 created_by=user
             )
             return JsonResponse({'status': 'success'})
@@ -240,6 +260,46 @@ def DeleteView(request):
                 return JsonResponse({'status': 'error', 'message': 'Invalid MFA code'})
 
             Password.objects.filter(passwordid=password_id, created_by=user).delete()
+            return JsonResponse({'status': 'success'})
+        except Exception as e:
+            print(f"Error: {e}")
+            return JsonResponse({'status': 'error', 'message': str(e)})
+    return JsonResponse({'status': 'error'})
+
+@csrf_exempt
+def ModifyView(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body.decode('utf-8'))
+            password_id = data.get('password_id')
+            password_name = data.get('name')
+            password_value = data.get('password')
+            expiration_day = data.get('expiration_day')
+            mfa_code = data.get('mfa_code')
+            user = User.objects.get(name=request.session.get('username'))
+
+            totp = pyotp.TOTP(user.mfakey)
+            if not totp.verify(mfa_code):
+                return JsonResponse({'status': 'error', 'message': 'Invalid MFA code'})
+
+            created_at_str = user.created_at.strftime('%Y%m%d%H%M%S%f')
+            combined_key = (user.mfakey + created_at_str).encode('utf-8')
+            key = base64.b32encode(combined_key)
+            if len(key) < 32:
+                key = key.ljust(32, b'\0')
+            else:
+                key = key[:32]
+            chacha = ChaCha20Poly1305(key)
+            nonce = os.urandom(12)
+            encrypted_password = chacha.encrypt(nonce, password_value.encode(), None)
+
+            Password.objects.filter(passwordid=password_id, created_by=user).update(
+                name=password_name,
+                password=encrypted_password.hex() + ":" + nonce.hex(),
+                expiration_day=expiration_day,
+                nonce=nonce,
+                updated_at=timezone.now()
+            )
             return JsonResponse({'status': 'success'})
         except Exception as e:
             print(f"Error: {e}")

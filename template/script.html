@@ -85,8 +85,6 @@
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
 </script>
 
-
-
 <script>
   function showMfaPopup(passwordId) {
     document.getElementById('password_id').value = passwordId;
@@ -125,7 +123,92 @@
     })
     .catch(error => console.error('Error:', error));
   });
+
+  function showModifyPopup(passwordId, passwordName, expirationDay) {
+    document.getElementById('modify_password_id').value = passwordId;
+    document.getElementById('modify_password_name').value = passwordName;
+    document.getElementById('modify_expiration_day').value = expirationDay;
+    console.log(`Password ID set for modification: ${passwordId}`);
+    $('#modify-popup').modal('show');
+  }
+
+  document.getElementById('modify-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const mfaCode = document.getElementById('modify_mfa_code').value;
+    const passwordId = document.getElementById('modify_password_id').value;
+    const passwordName = document.getElementById('modify_password_name').value;
+    const passwordValue = document.getElementById('modify_password_value').value;
+    const expirationDay = document.getElementById('modify_expiration_day').value;
+    console.log(`Submitting modification for password ID: ${passwordId}`);
+
+    fetch("{% url 'modifypw' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({
+        mfa_code: mfaCode,
+        password_id: passwordId,
+        name: passwordName,
+        password: passwordValue,
+        expiration_day: expirationDay
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'success') {
+        console.log(`Password with ID ${passwordId} modified successfully`);
+        $('#modify-popup').modal('hide');
+        window.location.reload();
+      } else {
+        alert('MFA verification failed. Please try again.');
+      }
+    })
+    .catch(error => console.error('Error:', error));
+  });
+
+  function showDeletePopup(passwordId) {
+    document.getElementById('delete_password_id').value = passwordId;
+    console.log(`Password ID set for deletion: ${passwordId}`);
+    $('#delete-password-modal').modal('show');
+  }
+
+  document.getElementById('delete-mfa-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const mfaCode = document.getElementById('delete_mfa_code').value;
+    const passwordId = document.getElementById('delete_password_id').value;
+    console.log(`Submitting MFA code: ${mfaCode} for password ID: ${passwordId}`);
+
+    fetch("{% url 'deletepw' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({
+        mfa_code: mfaCode,
+        password_id: passwordId
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'success') {
+        console.log(`Password with ID ${passwordId} deleted successfully`);
+        $('#delete-password-modal').modal('hide');
+        document.getElementById(`password-${passwordId}`).closest('tr').remove(); 
+        window.location.href = "{% url 'index' %}";
+      } else {
+        alert('MFA verification failed. Please try again.');
+      }
+    })
+    .catch(error => console.error('Error:', error));
+  });
 </script>
+
+
 
 <script>
   function showCreatePasswordForm() {
@@ -166,44 +249,5 @@
   });
 </script>
 
-<script>
-  function showDeletePopup(passwordId) {
-    document.getElementById('delete_password_id').value = passwordId;
-    console.log(`Password ID set for deletion: ${passwordId}`);
-    $('#delete-password-modal').modal('show');
-  }
-
-  document.getElementById('delete-mfa-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-
-    const mfaCode = document.getElementById('delete_mfa_code').value;
-    const passwordId = document.getElementById('delete_password_id').value;
-    console.log(`Submitting MFA code: ${mfaCode} for password ID: ${passwordId}`);
-
-    fetch("{% url 'deletepw' %}", {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': '{{ csrf_token }}'
-      },
-      body: JSON.stringify({
-        mfa_code: mfaCode,
-        password_id: passwordId
-      })
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.status === 'success') {
-        console.log(`Password with ID ${passwordId} deleted successfully`);
-        $('#delete-password-modal').modal('hide');
-        document.getElementById(`password-${passwordId}`).closest('tr').remove(); 
-        window.location.href = "{% url 'index' %}";
-      } else {
-        alert('MFA verification failed. Please try again.');
-      }
-    })
-    .catch(error => console.error('Error:', error));
-  });
-</script>
 
 <script src="{% static 'js/main.js' %}"></script>
