@@ -5,6 +5,10 @@
   src="{% static 'vendor/jquery/jquery-3.2.1.min.js' %}"
 ></script>
 
+<script 
+  src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl.min.js"
+></script>
+
 <script
   type="text/javascript"
   src="{% static 'vendor/animsition/js/animsition.min.js' %}"
@@ -50,6 +54,7 @@
 <script crossorigin src="{% static 'js/react.development.js' %}"></script>
 <script crossorigin src="{% static 'js/react-dom.development.js' %}"></script>
 
+<!-- Login -->
 <script>
   async function hashPassword(password, salt) {
       const enc = new TextEncoder();
@@ -85,6 +90,7 @@
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
 </script>
 
+<!-- View / modify / delete password -->
 <script>
   function showMfaPopup(passwordId) {
     document.getElementById('password_id').value = passwordId;
@@ -92,37 +98,124 @@
     $('#mfa-popup').modal('show');
   }
 
-  document.getElementById('mfa-form').addEventListener('submit', function(event) {
+  document.getElementById('mfa-form').addEventListener('submit', async function(event) {
     event.preventDefault();
 
-    const mfaCode = document.getElementById('mfa_code').value;
     const passwordId = document.getElementById('password_id').value;
-    console.log(`Submitting MFA code: ${mfaCode} for password ID: ${passwordId}`);
+    const mfaCode = document.getElementById('mfa_code').value;
+    console.log(`Requesting encrypted password for Password ID: ${passwordId}`);
 
-    fetch("{% url 'verify_mfa' %}", {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': '{{ csrf_token }}'
-      },
-      body: JSON.stringify({
-        mfa_code: mfaCode,
-        password_id: passwordId
-      })
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.status === 'success') {
-        const passwordField = document.getElementById(`password-${passwordId}`);
-        console.log(`Updating password field for ID ${passwordId}: ${data.password}`);
-        passwordField.textContent = data.password;
-        $('#mfa-popup').modal('hide');
-      } else {
-        alert('MFA verification failed. Please try again.');
-      }
-    })
-    .catch(error => console.error('Error:', error));
+    try {
+        const nonce = await getNonceFromIndexedDB(passwordId); // Retrieve nonce from IndexedDB
+        console.log(`Retrieved nonce for Password ID ${passwordId}:`, nonce);
+
+        fetch("{% url 'verify_mfa' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({ 
+                mfa_code: mfaCode,
+                password_id: passwordId 
+            })
+        })
+        .then(response => response.json())
+        .then(async data => {
+            if (data.status === 'success') {
+                const encryptedPassword = data.encrypted_password;
+                const key = data.key;
+
+                console.log("Encrypted Password:", encryptedPassword);
+                console.log("Encryption Key:", key);
+
+                // Expand nonce to 24 bytes for tweetnacl compatibility
+                let expandedNonce = new Uint8Array(24);
+                expandedNonce.set(nonce, 0);
+
+                // Perform decryption on the client-side
+                const decryptedPassword = await decryptPassword(encryptedPassword, expandedNonce, key);
+
+                // Update the password field
+                const passwordField = document.getElementById(`password-${passwordId}`);
+                passwordField.textContent = decryptedPassword;
+                $('#mfa-popup').modal('hide');
+            } else {
+                alert('MFA verification failed. Please try again.');
+            }
+        })
+        .catch(error => console.error('Error:', error));
+
+    } catch (error) {
+        console.error("Failed to retrieve nonce:", error);
+        alert("Error retrieving security data.");
+    }
   });
+
+// Retrieve nonce from IndexedDB
+  function getNonceFromIndexedDB(passwordId) {
+    return new Promise((resolve, reject) => {
+        console.log(`Attempting to retrieve nonce for Password ID: ${passwordId}`);
+
+        const dbRequest = indexedDB.open("NonceDB", 1);
+
+        dbRequest.onsuccess = function(event) {
+            const db = event.target.result;
+            const txn = db.transaction("nonces", "readonly");
+            const store = txn.objectStore("nonces");
+
+            console.log("Querying IndexedDB with Password ID:", passwordId);
+
+            const getRequest = store.get(Number(passwordId));  
+
+            getRequest.onsuccess = function() {
+                console.log("IndexedDB Get Request Success:", getRequest.result);
+                if (getRequest.result) {
+                    console.log(`Nonce found for Password ID ${passwordId}:`, getRequest.result.nonce);
+                    resolve(new Uint8Array(getRequest.result.nonce)); // ✅ Ensure Uint8Array format
+                } else {
+                    reject(`No nonce found for Password ID ${passwordId}.`);
+                }
+            };
+
+            getRequest.onerror = function() {
+                console.error("Error retrieving nonce from IndexedDB.");
+            };
+        };
+
+        dbRequest.onerror = function(event) {
+            console.error("IndexedDB opening error:", event.target.error);
+        };
+    });
+  }
+
+  async function decryptPassword(encryptedPasswordHex, nonce, keyHex) {
+    // Convert hex key to Uint8Array
+    const key = new Uint8Array([...keyHex.match(/.{1,2}/g)].map(byte => parseInt(byte, 16)));
+    const encryptedPassword = new Uint8Array([...encryptedPasswordHex.match(/.{1,2}/g)].map(byte => parseInt(byte, 16)));
+
+    console.log("Decryption Key:", key);
+    console.log("Encrypted Password Bytes:", encryptedPassword);
+    console.log("Expanded Nonce:", nonce);
+
+    if (key.length !== 32) {
+        throw new Error(`Invalid key size: Expected 32 bytes, got ${key.length}`);
+    }
+
+    //  Ensure nonce is 24 bytes before decrypting
+    if (nonce.length !== 24) {
+        throw new Error(`Invalid nonce size: Expected 24 bytes, got ${nonce.length}`);
+    }
+
+    // Decrypt using tweetnacl.secretbox
+    const decryptedData = nacl.secretbox.open(encryptedPassword, nonce, key);
+
+    if (!decryptedData) {
+        throw new Error("Decryption failed!");
+    }
+
+    return new TextDecoder().decode(decryptedData);
+  }
 
   function showModifyPopup(passwordId, passwordName, expirationDay) {
     document.getElementById('modify_password_id').value = passwordId;
@@ -132,7 +225,7 @@
     $('#modify-popup').modal('show');
   }
 
-  document.getElementById('modify-form').addEventListener('submit', function(event) {
+  document.getElementById('modify-form').addEventListener('submit', async function(event) {
     event.preventDefault();
 
     const mfaCode = document.getElementById('modify_mfa_code').value;
@@ -140,34 +233,105 @@
     const passwordName = document.getElementById('modify_password_name').value;
     const passwordValue = document.getElementById('modify_password_value').value;
     const expirationDay = document.getElementById('modify_expiration_day').value;
+
     console.log(`Submitting modification for password ID: ${passwordId}`);
 
-    fetch("{% url 'modifypw' %}", {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': '{{ csrf_token }}'
-      },
-      body: JSON.stringify({
-        mfa_code: mfaCode,
-        password_id: passwordId,
-        name: passwordName,
-        password: passwordValue,
-        expiration_day: expirationDay
-      })
+    // Step 1: Send updated metadata to the server (MFA verified first)
+    const response = await fetch("{% url 'modifypw' %}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({
+            mfa_code: mfaCode,
+            password_id: passwordId,
+            name: passwordName,
+            expiration_day: expirationDay
+        })
+    });
+
+    const data = await response.json();
+
+    if (data.status !== 'success') {
+        alert("MFA verification failed. Please try again.");
+        return;
+    }
+
+    const key = data.key;
+    console.log("Received new encryption key:", key);
+
+    // Step 2: Generate new nonce
+    let nonce = new Uint8Array(12);
+    window.crypto.getRandomValues(nonce);
+    console.log("Generated new nonce:", nonce);
+
+    // Step 3: Expand nonce to 24 bytes (tweetnacl requires a 24-byte nonce)
+    let expandedNonce = new Uint8Array(24);
+    expandedNonce.set(nonce, 0); // ✅ Copy 12-byte nonce into 24-byte buffer
+
+    console.log(`Expanded Nonce:`, expandedNonce);
+
+    // Step 4: Encrypt password using ChaCha20
+    const encryptedPassword = await encryptPassword(passwordValue, expandedNonce, key);
+    console.log("Encrypted password:", encryptedPassword);
+
+    // Step 5: Update IndexedDB with new nonce
+    updateNonceInIndexedDB(passwordId, nonce);
+
+    // Step 6: Send encrypted password to Django for storage
+    fetch("{% url 'store_encrypted_password' %}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ 
+            passwordid: passwordId,
+            encrypted_password: Array.from(encryptedPassword).map(byte => byte.toString(16).padStart(2, '0')).join('')
+        })
     })
     .then(response => response.json())
     .then(data => {
-      if (data.status === 'success') {
-        console.log(`Password with ID ${passwordId} modified successfully`);
-        $('#modify-popup').modal('hide');
-        window.location.reload();
-      } else {
-        alert('MFA verification failed. Please try again.');
-      }
+        if (data.status === 'success') {
+            console.log(`Password with ID ${passwordId} encrypted & stored successfully`);
+            $('#modify-popup').modal('hide');
+            window.location.reload();
+        } else {
+            alert("Error storing password.");
+        }
     })
-    .catch(error => console.error('Error:', error));
+    .catch(error => console.error("Error storing encrypted password:", error));
   });
+
+  function updateNonceInIndexedDB(passwordid, nonce) {
+    console.log("Updating nonce:", nonce, "for password ID:", passwordid);
+
+    if (!passwordid || !nonce) {
+        console.error("Invalid password ID or nonce, cannot update!");
+        return;
+    }
+
+    const dbRequest = indexedDB.open("NonceDB", 1);
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+        const txn = db.transaction("nonces", "readwrite");
+        const objectstore = txn.objectStore("nonces");
+
+        console.log("Updating nonce entry for password ID:", passwordid);
+        const updateRequest = objectstore.put({
+            passwordid: Number(passwordid),
+            nonce: Array.from(nonce)
+        });
+
+        updateRequest.onsuccess = function() {
+            console.log(`Nonce updated successfully for Password ID ${passwordid}`);
+        };
+
+        updateRequest.onerror = function(event) {
+            console.error(`Error updating nonce for Password ID ${passwordid}:`, event.target.error);
+        };
+    };
+
+    dbRequest.onerror = function(event) {
+        console.error("IndexedDB opening error:", event.target.error);
+    };
+  }
 
   function showDeletePopup(passwordId) {
     document.getElementById('delete_password_id').value = passwordId;
@@ -180,73 +344,497 @@
 
     const mfaCode = document.getElementById('delete_mfa_code').value;
     const passwordId = document.getElementById('delete_password_id').value;
-    console.log(`Submitting MFA code: ${mfaCode} for password ID: ${passwordId}`);
+    console.log(`Submitting MFA code: ${mfaCode} for Password ID: ${passwordId}`);
 
     fetch("{% url 'deletepw' %}", {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': '{{ csrf_token }}'
-      },
-      body: JSON.stringify({
-        mfa_code: mfaCode,
-        password_id: passwordId
-      })
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({
+            mfa_code: mfaCode,
+            password_id: passwordId
+        })
     })
     .then(response => response.json())
     .then(data => {
-      if (data.status === 'success') {
-        console.log(`Password with ID ${passwordId} deleted successfully`);
-        $('#delete-password-modal').modal('hide');
-        document.getElementById(`password-${passwordId}`).closest('tr').remove(); 
-        window.location.href = "{% url 'index' %}";
-      } else {
-        alert('MFA verification failed. Please try again.');
-      }
+        if (data.status === 'success') {
+            console.log(`Password with ID ${passwordId} deleted successfully`);
+            
+            // Step 1: Delete the nonce from IndexedDB
+            deleteNonceFromIndexedDB(passwordId);
+
+            // Step 2: Hide modal and remove entry from the UI
+            $('#delete-password-modal').modal('hide');
+            document.getElementById(`password-${passwordId}`).closest('tr').remove(); 
+
+            // Step 3: Redirect to index page
+            window.location.href = "{% url 'index' %}";
+        } else {
+            alert('MFA verification failed. Please try again.');
+        }
     })
     .catch(error => console.error('Error:', error));
   });
+
+  function deleteNonceFromIndexedDB(passwordId) {
+    console.log(`Deleting nonce for Password ID: ${passwordId}`);
+
+    const dbRequest = indexedDB.open("NonceDB", 1);
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+        const txn = db.transaction("nonces", "readwrite");
+        const store = txn.objectStore("nonces");
+
+        console.log("Deleting IndexedDB entry for Password ID:", passwordId);
+        const deleteRequest = store.delete(Number(passwordId)); // ✅ Delete by password ID
+
+        deleteRequest.onsuccess = function() {
+            console.log(`Nonce deleted successfully for Password ID ${passwordId}`);
+        };
+
+        deleteRequest.onerror = function(event) {
+            console.error(`Error deleting nonce for Password ID ${passwordId}:`, event.target.error);
+        };
+    };
+
+    dbRequest.onerror = function(event) {
+        console.error("IndexedDB opening error:", event.target.error);
+    };
+  }
+
+  function showMfaPopupForClearData() {
+    console.log("Opening MFA verification for clearing IndexedDB...");
+    $('#clear-data-modal').modal('show');
+    }
+
+  document.getElementById('confirm-clear-data').addEventListener('click', async function() {
+        const mfaCode = document.getElementById('clear_mfa_code').value;
+
+        if (!mfaCode) {
+            alert("Please enter your MFA code.");
+            return;
+        }
+
+        console.log("Submitting MFA Code:", mfaCode);
+
+        try {
+            const response = await fetch("{% url 'verify_mfaCode' %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({ mfa_code: mfaCode })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                console.log("MFA verification successful! Clearing IndexedDB...");
+                clearIndexedDB(); // Only clear data if MFA is valid
+            } else {
+                alert("MFA verification failed. Please try again.");
+            }
+
+        } catch (error) {
+            console.error("Error verifying MFA Code:", error);
+            alert("Error verifying MFA. Please try again.");
+        }
+    });
+
+  function clearIndexedDB() {
+    console.log("Clearing all IndexedDB data in `nonces` store...");
+
+    const dbRequest = indexedDB.open("NonceDB", 1);
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+
+        const txn = db.transaction("nonces", "readwrite");
+        const store = txn.objectStore("nonces");
+
+        const clearRequest = store.clear();
+
+        clearRequest.onsuccess = function() {
+            console.log("IndexedDB cleared successfully!");
+            alert("All IndexedDB data has been deleted.");
+            $('#clear-data-modal').modal('hide'); // Close modal after clearing
+        };
+
+        clearRequest.onerror = function(event) {
+            console.error("Error clearing IndexedDB:", event.target.error);
+        };
+    };
+
+    dbRequest.onerror = function(event) {
+        console.error("IndexedDB opening error:", event.target.error);
+    };
+}
+
+  function showMfaExportPopup() {
+    console.log("Opening MFA verification for exporting IndexedDB data...");
+    $('#mfa-export-popup').modal('show');
+  }
+  
+  document.getElementById('mfa-export-form').addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const mfaCode = document.getElementById('mfa_export_code').value;
+
+    if (!mfaCode) {
+        alert("Please enter your MFA code.");
+        return;
+    }
+
+    console.log("Submitting MFA Code for verification...");
+
+    try {
+        const response = await fetch("{% url 'verify_mfaCode' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({ mfa_code: mfaCode })
+        });
+
+        const data = await response.json();
+
+        if (data.status !== 'success') {
+            alert("MFA verification failed. Please try again.");
+            return;
+        }
+
+        console.log("MFA verification successful! Exporting IndexedDB records...");
+        fetchIndexedDBRecords();  // Start exporting data
+
+    } catch (error) {
+        console.error("Error verifying MFA Code:", error);
+        alert("Error verifying MFA. Please try again.");
+    }
+  });
+  
+  function fetchIndexedDBRecords() {
+    console.log("Fetching all IndexedDB records for export...");
+
+    const dbRequest = indexedDB.open("NonceDB", 1);
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+        const txn = db.transaction("nonces", "readonly");
+        const store = txn.objectStore("nonces");
+
+        const getAllRequest = store.getAll();
+
+        getAllRequest.onsuccess = function() {
+            console.log("Fetched IndexedDB records:", getAllRequest.result);
+
+            if (!getAllRequest.result.length) {
+                alert("No data available for export.");
+                return;
+            }
+
+            // Convert IndexedDB records into JSON format
+            const jsonData = JSON.stringify(getAllRequest.result, null, 4);
+
+            // Generate a downloadable JSON file
+            triggerDownload(jsonData);
+        };
+
+        getAllRequest.onerror = function(event) {
+            console.error("Error retrieving IndexedDB records:", event.target.error);
+        };
+    };
+
+    dbRequest.onerror = function(event) {
+        console.error("IndexedDB opening error:", event.target.error);
+    };
+}
+
+  function triggerDownload(jsonData) {
+    console.log("Generating JSON file for download...");
+
+    const blob = new Blob([jsonData], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "exported_data.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    console.log("JSON file download triggered.");
+  }
+
+  function showMfaImportPopup() {
+    console.log("Opening MFA verification for importing IndexedDB data...");
+    $('#mfa-import-popup').modal('show');
+  }
+
+  document.getElementById('mfa-import-form').addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const mfaCode = document.getElementById('mfa_import_code').value;
+    const fileInput = document.getElementById('import_json_file').files[0];
+
+    if (!mfaCode || !fileInput) {
+        alert("Please enter MFA code and select a JSON file.");
+        return;
+    }
+
+    console.log("Submitting MFA Code for verification...");
+
+    try {
+        const response = await fetch("{% url 'verify_mfaCode' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({ mfa_code: mfaCode })
+        });
+
+        const data = await response.json();
+
+        if (data.status !== 'success') {
+            alert("MFA verification failed. Please try again.");
+            return;
+        }
+
+        console.log("MFA verification successful! Importing JSON file...");
+        importIndexedDBRecords(fileInput);  // ✅ Start importing process
+
+    } catch (error) {
+        console.error("Error verifying MFA Code:", error);
+        alert("Error verifying MFA. Please try again.");
+    }
+  });
+
+  function importIndexedDBRecords(file) {
+    const reader = new FileReader();
+
+    reader.onload = function(event) {
+        try {
+            const jsonData = JSON.parse(event.target.result);
+
+            console.log("Parsed JSON data:", jsonData);
+
+            if (!Array.isArray(jsonData) || !jsonData.length) {
+                alert("Invalid JSON file format.");
+                return;
+            }
+
+            const dbRequest = indexedDB.open("NonceDB", 1);
+
+            dbRequest.onsuccess = function(event) {
+                const db = event.target.result;
+                const txn = db.transaction("nonces", "readwrite");
+                const store = txn.objectStore("nonces");
+
+                jsonData.forEach(record => {
+                    if (record.passwordid && record.nonce) {
+                        store.put(record);
+                        console.log(`Imported password ID ${record.passwordid}`);
+                    } else {
+                        console.warn("Invalid record skipped:", record);
+                    }
+                });
+
+                alert("Data imported successfully!");
+                $('#mfa-import-popup').modal('hide'); // Close modal after importing
+            };
+
+            dbRequest.onerror = function(event) {
+                console.error("IndexedDB opening error:", event.target.error);
+            };
+
+        } catch (error) {
+            console.error("Error parsing JSON:", error);
+            alert("Error parsing JSON file. Please check the format.");
+        }
+    };
+
+    reader.readAsText(file);
+  }
 </script>
 
-
-
+<!-- Create password -->
 <script>
   function showCreatePasswordForm() {
     $('#create-password-modal').modal('show');
   }
 
-  document.getElementById('create-password-form').addEventListener('submit', function(event) {
+  document.getElementById('create-password-form').addEventListener('submit', async function(event) {
     event.preventDefault();
 
     const name = document.getElementById('name').value;
     const password = document.getElementById('password').value;
     const expirationDay = document.getElementById('expiration_day').value;
 
-    fetch("{% url 'createpw' %}", {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': '{{ csrf_token }}'
-      },
-      body: JSON.stringify({
-        name: name,
-        password: password,
-        expiration_day: expirationDay
-      })
+    // Step 1: Send initial request to server
+    const response = await fetch("{% url 'createpw' %}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ name, expiration_day: expirationDay }) // ✅ Send password name & expiration day
+    });
+
+    const data = await response.json();
+
+    if (data.status !== 'success') {
+        alert("Error creating password entry.");
+        return;
+    }
+
+    const key = data.key;
+    const passwordId = data.passwordid;
+
+    console.log("Received key:", key);
+
+    // Step 2: Generate a random 12-byte nonce
+    let nonce = new Uint8Array(12);
+    window.crypto.getRandomValues(nonce);
+
+    console.log("Generated nonce:", nonce);
+
+    // Step 3: Expand nonce to 24 bytes (tweetnacl requires a 24-byte nonce)
+    let expandedNonce = new Uint8Array(24);
+    expandedNonce.set(nonce, 0); // ✅ Copy the 12-byte nonce into the first part of the 24-byte buffer
+
+    console.log(`Expanded Nonce:`, expandedNonce);
+
+    // Step 4: Encrypt password using ChaCha20
+    const encryptedPassword = await encryptPassword(password, expandedNonce, key);
+
+    console.log("Encrypted password:", encryptedPassword);
+
+    // Step 5: Store only nonce in IndexedDB (not encrypted password)
+    storeNonceInIndexedDB(passwordId, nonce);
+
+    // Step 6: Send encrypted password back to Django for storage in SQLite
+    fetch("{% url 'store_encrypted_password' %}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ 
+            passwordid: passwordId, 
+            encrypted_password: Array.from(encryptedPassword).map(byte => byte.toString(16).padStart(2, '0')).join('') // ✅ Convert Uint8Array to Hex
+        })
     })
     .then(response => response.json())
     .then(data => {
-      if (data.status === 'success') {
-        alert('Password created successfully!');
-        $('#create-password-modal').modal('hide');
-        document.getElementById('create-password-form').reset();
-        window.location.href = "{% url 'index' %}";
-      } else {
-        alert('An error occurred. Please try again.');
-      }
+        if (data.status === 'success') {
+            alert("Password stored successfully!");
+
+            // ✅ Redirect to 'index' page
+            window.location.href = "{% url 'index' %}";
+        } else {
+            alert("Error storing password.");
+        }
     })
-    .catch(error => console.error('Error:', error));
+    .catch(error => console.error("Error storing encrypted password:", error));
   });
+
+  function storeNonceInIndexedDB(passwordid, nonce) {
+    console.log("Storing nonce:", nonce, "for password ID:", passwordid);
+
+    if (!passwordid || !nonce) {
+        console.error("Invalid password ID or nonce, cannot store!");
+        return;
+    }
+
+    const dbRequest = indexedDB.open("NonceDB", 1);
+
+    dbRequest.onupgradeneeded = function(event) {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains("nonces")) {
+            db.createObjectStore("nonces", { keyPath: "passwordid" });
+        }
+    };
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+        const txn = db.transaction("nonces", "readwrite");
+        const objectstore = txn.objectStore("nonces");
+
+        console.log("Adding nonce entry for password ID:", passwordid);
+        const addRequest = objectstore.put({
+            passwordid: passwordid,
+            nonce: Array.from(nonce) // ✅ Store only nonce (not encrypted password)
+        });
+
+        addRequest.onsuccess = function() {
+            console.log(`Nonce stored successfully for Password ID ${passwordid}`);
+        };
+
+        addRequest.onerror = function(event) {
+            console.error(`Error storing nonce for Password ID ${passwordid}:`, event.target.error);
+        };
+    };
+
+    dbRequest.onerror = function(event) {
+        console.error("IndexedDB opening error:", event.target.error);
+    };
+  }
+
+  async function encryptPassword(password, nonce, keyHex) {
+    // Convert hex key to Uint8Array
+    const key = new Uint8Array([...keyHex.match(/.{1,2}/g)].map(byte => parseInt(byte, 16)));
+    const passwordBytes = new TextEncoder().encode(password);
+
+    console.log("Encryption Key:", key);
+    console.log("Password Bytes:", passwordBytes);
+    console.log("Expanded Nonce:", nonce);
+
+    // Ensure key is 32 bytes long
+    if (key.length !== 32) {
+        throw new Error(`Invalid key size: Expected 32 bytes, got ${key.length}`);
+    }
+
+    // Encrypt using tweetnacl.secretbox (ChaCha20Poly1305)
+    const encryptedPassword = nacl.secretbox(passwordBytes, nonce, key);
+
+    if (!encryptedPassword) {
+        throw new Error("Encryption failed!");
+    }
+
+    return encryptedPassword;
+  }
+
+  // document.getElementById('create-password-form').addEventListener('submit', function(event) {
+  //   event.preventDefault();
+
+  //   const name = document.getElementById('name').value;
+  //   const password = document.getElementById('password').value;
+  //   const expirationDay = document.getElementById('expiration_day').value;
+
+  //   fetch("{% url 'createpw' %}", {
+  //     method: 'POST',
+  //     headers: {
+  //       'Content-Type': 'application/json',
+  //       'X-CSRFToken': '{{ csrf_token }}'
+  //     },
+  //     body: JSON.stringify({
+  //       name: name,
+  //       password: password,
+  //       expiration_day: expirationDay
+  //     })
+  //   })
+  //   .then(response => response.json())
+  //   .then(data => {
+  //     if (data.status === 'success') {
+  //       alert('Password created successfully!');
+  //       $('#create-password-modal').modal('hide');
+  //       document.getElementById('create-password-form').reset();
+  //       window.location.href = "{% url 'index' %}";
+  //     } else {
+  //       alert('An error occurred. Please try again.');
+  //     }
+  //   })
+  //   .catch(error => console.error('Error:', error));
+  // });
 </script>
 
 

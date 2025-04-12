@@ -28,12 +28,31 @@
                         <li>
                             <a href="/">Home</a>
                         </li>
-
                         <li>
                             <a href="#" onclick="showCreatePasswordForm()">Create Password</a>
                         </li>
                         <li>
-                            <a href="/logout">logout</a>
+                            <a href="/logout">Logout</a>
+                        </li>
+                        <li class="dropdown">
+                            <a href="#" class="dropdown-toggle" data-toggle="dropdown">Action</a>
+                            <ul class="dropdown-menu">
+                                <li>
+                                    <div class="col align-self-center">
+                                        <a href="#" onclick="showMfaPopupForClearData()">Clear Local Data</a>
+                                    </div>
+                                </li>
+                                <li>
+                                    <div class="col align-self-center">
+                                        <a href="#" onclick="showMfaExportPopup()">Export Data</a>
+                                    </div>
+                                </li>
+                                <li>
+                                    <div class="col align-self-center">
+                                        <a href="#" onclick="showMfaImportPopup()">Import Data</a>
+                                    </div>
+                                </li>
+                            </ul>
                         </li>
                     </ul>
                 </nav>
@@ -68,6 +87,76 @@
                         <input type="text" class="form-control" id="expiration_day" name="expiration_day" required>
                     </div>
                     <button type="submit" class="btn btn-primary">Create Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MFA Verification Popup for Clearing Data -->
+<div id="clear-data-modal" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">MFA Verification - Clear Local Data</h5>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Please enter your MFA code to clear local data:</p>
+                <input type="text" id="clear_mfa_code" class="form-control" placeholder="Enter MFA Code">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="confirm-clear-data">Clear Data</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MFA Verification Popup for Exporting Data -->
+<div id="mfa-export-popup" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">MFA Verification - Export Data</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="mfa-export-form">
+                    <div class="form-group">
+                        <label for="mfa_export_code">Enter MFA Code</label>
+                        <input type="text" class="form-control" id="mfa_export_code" name="mfa_export_code" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Verify & Export</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MFA Verification Popup for Importing Data -->
+<div id="mfa-import-popup" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">MFA Verification - Import Data</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="mfa-import-form">
+                    <div class="form-group">
+                        <label for="mfa_import_code">Enter MFA Code</label>
+                        <input type="text" class="form-control" id="mfa_import_code" name="mfa_import_code" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="import_json_file">Upload JSON File</label>
+                        <input type="file" class="form-control" id="import_json_file" accept=".json">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Verify & Import</button>
                 </form>
             </div>
         </div>

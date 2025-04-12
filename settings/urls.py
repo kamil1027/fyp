@@ -31,5 +31,7 @@ urlpatterns = [
     path('verify_mfa/', verify_mfa, name="verify_mfa"),
     path('password/create/', CreateView, name='createpw'),
     path('password/delete/', DeleteView, name='deletepw'),
-    path('password/modify/', ModifyView, name='modifypw')
+    path('password/modify/', ModifyView, name='modifypw'),
+    path('password/storeEP/', store_encrypted_password, name='store_encrypted_password'),
+    path('verify_user', verify_mfaCodeView, name='verify_mfaCode')
 ]
